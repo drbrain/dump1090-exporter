@@ -13,7 +13,7 @@ from math import asin, atan, cos, degrees, radians, sin, sqrt
 from typing import Any, Dict, Sequence, Tuple, Union
 
 import aiohttp
-from aioprometheus import Gauge
+from aioprometheus import Counter, Gauge
 from aioprometheus.service import Service
 
 from .metrics import Specs
@@ -32,7 +32,6 @@ AircraftKeys = (
     "hex",
     "lat",
     "lon",
-    "messages",
     "mlat",
     "nucp",
     "rssi",
@@ -166,22 +165,6 @@ def haversine_distance(
     return distance
 
 
-def create_gauge_metric(label: str, doc: str, prefix: str = "") -> Gauge:
-    """Create a Gauge metric
-
-    :param label: A label for the metric.
-
-    :param doc: A help string for the metric.
-
-    :param prefix: An optional prefix for the metric label that applies a
-        common start string to the metric which simplifies locating the
-        metrics in Prometheus because they will all be grouped together when
-        searching.
-    """
-    gauge = Gauge(f"{prefix}{label}", doc)
-    return gauge
-
-
 class Dump1090Exporter:
     """
     This class is responsible for fetching, parsing and exporting dump1090
@@ -312,14 +295,25 @@ class Dump1090Exporter:
 
         # aircraft
         d = self.metrics["aircraft"]
-        for (name, label, doc) in Specs["aircraft"]:  # type: ignore
-            d[name] = create_gauge_metric(label, doc, prefix=self.prefix)
+        for (name, prometheus_name, doc) in Specs["aircraft"]:  # type: ignore
+            d[name] = Gauge(f"{self.prefix}{prometheus_name}", doc)
 
         # statistics
         for group, metrics_specs in Specs["stats"].items():  # type: ignore
             d = self.metrics["stats"].setdefault(group, {})
-            for name, label, doc in metrics_specs:
-                d[name] = create_gauge_metric(label, doc, prefix=self.prefix)
+            for (
+                metric_type,
+                time_period,
+                stats_name,
+                prometheus_name,
+                doc,
+            ) in metrics_specs:
+                if metric_type == "gauge":
+                    metric = Gauge(f"{self.prefix}{prometheus_name}", doc)
+                elif metric_type == "counter":
+                    metric = Counter(f"{self.prefix}{prometheus_name}", doc)
+
+                d[stats_name] = (time_period, metric)
 
     async def _fetch(
         self,
@@ -384,7 +378,7 @@ class Dump1090Exporter:
             start = datetime.datetime.now()
             try:
                 stats = await self._fetch(self.resources.stats)
-                self.process_stats(stats, time_periods=self.stats_time_periods)
+                self.process_stats(stats)
             except Exception as exc:  # pylint: disable=broad-except
                 logger.error(f"Error fetching dump1090 stats data: {exc}")
 
@@ -411,42 +405,49 @@ class Dump1090Exporter:
             wait_seconds = (start + self.aircraft_interval - end).total_seconds()
             await asyncio.sleep(wait_seconds)
 
-    def process_stats(
-        self, stats: dict, time_periods: Sequence[str] = ("last1min",)
-    ) -> None:
+    def process_stats(self, stats: dict) -> None:
         """Process dump1090 statistics into exported metrics.
 
         :param stats: a dict containing dump1090 statistics data.
         """
-        metrics = self.metrics["stats"]  # type: Dict[str, Dict[str, Gauge]]
+        stats_metrics = self.metrics[
+            "stats"
+        ]  # type: Dict[str, Dict[str, Tuple[str, Gauge]]]
 
-        for time_period in time_periods:
-            try:
-                tp_stats = stats[time_period]
-            except KeyError:
-                logger.exception(f"Problem extracting time period: {time_period}")
-                continue
+        for group_key, group_metrics in stats_metrics.items():
+            for name, (time_period, metric) in group_metrics.items():
+                try:
+                    tp_stats = stats[time_period]
+                except KeyError:
+                    logger.exception(f"Problem extracting time period: {time_period}")
+                    continue
 
-            labels = dict(time_period=time_period)
+                d = tp_stats[group_key] if group_key else tp_stats
 
-            for key, gauge in metrics.items():
-                d = tp_stats[key] if key else tp_stats
-                for name, metric in gauge.items():
-                    try:
-                        value = d[name]
-                        # 'accepted' values are in a list
-                        if isinstance(value, list):
-                            value = value[0]
-                    except KeyError:
-                        # 'signal' and 'peak_signal' are not present if
-                        # there are no aircraft.
-                        if name not in ["peak_signal", "signal"]:
-                            key_str = f" {key} " if key else " "
-                            logger.warning(
-                                f"Problem extracting{key_str}item '{name}' from: {d}"
-                            )
-                        value = math.nan
-                    metric.set(labels, value)
+                try:
+                    value = d[name]
+
+                    if name == "accepted":
+                        for bit_errors, count in enumerate(value):
+                            metric.set({"bit_errors": bit_errors}, count)
+                    elif name == "gain_seconds":
+                        for db, count in value:
+                            metric.set({"dB": db}, count)
+                    elif name == "messages_by_df":
+                        for data_format, count in enumerate(value):
+                            metric.set({"data_format": data_format}, count)
+                    else:
+                        metric.set({}, value)
+
+                except KeyError:
+                    # 'signal' and 'peak_signal' are not present if
+                    # there are no aircraft.
+                    if name not in ["peak_signal", "signal"]:
+                        key_str = f" {group_key} " if group_key else " "
+                        logger.warning(
+                            f"Problem extracting{key_str}item '{name}' from: {d}"
+                        )
+                    metric.set({}, math.nan)
 
     def process_aircraft(self, aircraft: dict, threshold: int = 15) -> None:
         """Process aircraft statistics into exported metrics.
@@ -460,8 +461,6 @@ class Dump1090Exporter:
         for entry in aircraft["aircraft"]:
             for key in AircraftKeys:
                 entry.setdefault(key, None)
-
-        messages = aircraft["messages"]
 
         # 'seen' shows how long ago (in seconds before "now") a message
         # was last received from an aircraft.
@@ -516,24 +515,23 @@ class Dump1090Exporter:
                 if a["mlat"] and "lat" in a["mlat"]:
                     aircraft_with_mlat += 1
 
-        # Add any current data into the 'latest' time_period bucket
-        labels = dict(time_period="latest")
-        d = self.metrics["aircraft"]
-        d["observed"].set(labels, aircraft_observed)
-        d["observed_with_pos"].set(labels, aircraft_with_pos)
-        d["observed_with_mlat"].set(labels, aircraft_with_mlat)
-        d["max_range"].set(labels, aircraft_max_range)
-        d["messages_total"].set(labels, messages)
+        labels = {}
+        metrics = self.metrics["aircraft"]
+
+        metrics["observed"].set(labels, aircraft_observed)
+        metrics["observed_with_pos"].set(labels, aircraft_with_pos)
+        metrics["observed_with_mlat"].set(labels, aircraft_with_mlat)
+        metrics["max_range"].set(labels, aircraft_max_range)
 
         for direction, value in aircraft_direction.items():
             labels = dict(time_period="latest", direction=direction)
-            d["observed_with_direction"].set(labels, value)
-            d["max_range_by_direction"].set(
+            metrics["observed_with_direction"].set(labels, value)
+            metrics["max_range_by_direction"].set(
                 labels, aircraft_direction_max_range[direction]
             )
 
         logger.debug(
             f"aircraft: observed={aircraft_observed}, "
             f"with_pos={aircraft_with_pos}, with_mlat={aircraft_with_mlat}, "
-            f"max_range={aircraft_max_range}, messages={messages}"
+            f"max_range={aircraft_max_range}"
         )

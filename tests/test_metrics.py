@@ -24,4 +24,4 @@ class TestMetrics(unittest.TestCase):
             self.assertIsInstance(k1, str)
             for i in v1:
                 self.assertIsInstance(i, tuple)
-                self.assertEqual(len(i), 3)
+                self.assertEqual(len(i), 5)

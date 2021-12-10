@@ -85,11 +85,11 @@ class TestExporter(asynctest.TestCase):  # pylint: disable=missing-class-docstri
 
             # Check that expected metrics are present in the response
             specs = dump1090exporter.metrics.Specs
-            for _attr, label, _doc in specs["aircraft"]:
-                self.assertIn(f"{de.prefix}{label}{{", data)
+            for _attr, prometheus_name, _doc in specs["aircraft"]:
+                self.assertIn(f"{de.prefix}{prometheus_name}", data)
             for _group_name, group_metrics in specs["stats"].items():
-                for _attr, label, _doc in group_metrics:
-                    self.assertIn(f"{de.prefix}{label}{{", data)
+                for (_type, _tp, _s_name, prometheus_name, _doc) in group_metrics:
+                    self.assertIn(f"{de.prefix}{prometheus_name}", data)
 
             await de.stop()
 

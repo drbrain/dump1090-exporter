@@ -16,12 +16,12 @@ When the application creates the actual Prometheus metrics labels it prefixes
 the case of the stats group of metrics it also adds a `stats_` to the prefix
 to group the stats with a common label prefix.
 
-So an item listed under the aircraft section, for example the 'messages_total'
-item, will end up with a Prometheus metric label of:
+So an item listed under the aircraft section, for example the
+'recent_aircraft_observed' item, will end up with a Prometheus metric label of:
 
 .. code-block:: console
 
-    dump1090_messages_total
+    dump1090_recent_aircraft_observed
 
 An item listed under the stats section, for example the 'stats_messages_total'
 item, will end up with a Prometheus metric label of:
@@ -78,76 +78,171 @@ Specs = {
             "recent_aircraft_max_range_by_direction",
             "Maximum range of recently observed aircraft by direction relative to receiver",
         ),
-        (
-            "messages_total",
-            "messages_total",
-            "Number of Mode-S messages processed since start up",
-        ),
     ),
     "stats": {
         # top level items not in a sub-group are listed under this empty key.
         "": (
-            ("messages", "stats_messages_total", "Number of Mode-S messages processed"),
+            (
+                "counter",
+                "total",
+                "messages",
+                "stats_messages_total",
+                "Number of Mode-S messages processed",
+            ),
+            (
+                "counter",
+                "total",
+                "messages_by_df",
+                "stats_messages_by_df_total",
+                "Number of messages processed by downlink format",
+            ),
+        ),
+        "adaptive": (
+            (
+                "gauge",
+                "last1min",
+                "dynamic_range_limit_db",
+                "stats_adaptive_dynamic_range_limit_dB",
+                "Current dynamic range gain upper limit in dB",
+            ),
+            (
+                "counter",
+                "total",
+                "gain_changes",
+                "stats_adaptive_gain_changes",
+                "Number of gain changes caused by adaptive gain control",
+            ),
+            (
+                "gauge",
+                "last1min",
+                "gain_db",
+                "stats_adaptive_gain_dB",
+                "Current adaptive gain setting in dB",
+            ),
+            (
+                "counter",
+                "total",
+                "gain_seconds",
+                "stats_adaptive_gain_dB_seconds",
+                "Adaptive gain dB by seconds at that level",
+            ),
+            (
+                "counter",
+                "total",
+                "loud_decoded",
+                "stats_adaptive_loud_decoded",
+                "Number of loud decoded messages",
+            ),
+            (
+                "counter",
+                "total",
+                "loud_undecoded",
+                "stats_adaptive_loud_undecoded",
+                "Number of loud undecoded bursts",
+            ),
+            (
+                "gauge",
+                "total",
+                "noise_dbfs",
+                "stats_adaptive_noise_level_dbFS",
+                "Noise level dbFS",
+            ),
         ),
         "cpr": (
             (
+                "counter",
+                "total",
                 "airborne",
                 "stats_cpr_airborne",
                 "Number of airborne CPR messages received",
             ),
-            ("surface", "stats_cpr_surface", "Number of surface CPR messages received"),
-            ("filtered", "stats_cpr_filtered", "Number of CPR messages ignored"),
             (
+                "counter",
+                "total",
+                "surface",
+                "stats_cpr_surface",
+                "Number of surface CPR messages received",
+            ),
+            (
+                "counter",
+                "total",
+                "filtered",
+                "stats_cpr_filtered",
+                "Number of CPR messages ignored",
+            ),
+            (
+                "counter",
+                "total",
                 "global_bad",
                 "stats_cpr_global_bad",
                 "Global positions that were rejected",
             ),
             (
+                "counter",
+                "total",
                 "global_ok",
                 "stats_cpr_global_ok",
                 "Global positions successfully derived",
             ),
             (
+                "counter",
+                "total",
                 "global_range",
                 "stats_cpr_global_range",
                 "Global positions rejected due to receiver max range check",
             ),
             (
+                "counter",
+                "total",
                 "global_skipped",
                 "stats_cpr_global_skipped",
                 "Global position attempts skipped due to missing data",
             ),
             (
+                "counter",
+                "total",
                 "global_speed",
                 "stats_cpr_global_speed",
                 "Global positions rejected due to speed check",
             ),
             (
+                "counter",
+                "total",
                 "local_aircraft_relative",
                 "stats_cpr_local_aircraft_relative",
                 "Local positions found relative to a previous aircraft position",
             ),
             (
+                "counter",
+                "total",
                 "local_ok",
                 "stats_cpr_local_ok",
                 "Local (relative) positions successfully found",
             ),
             (
+                "counter",
+                "total",
                 "local_range",
                 "stats_cpr_local_range",
                 "Local positions rejected due to receiver max range check",
             ),
             (
+                "counter",
+                "total",
                 "local_receiver_relative",
                 "stats_cpr_local_receiver_relative",
                 "Local positions found relative to the receiver position",
             ),
             (
+                "counter",
+                "total",
                 "local_skipped",
                 "stats_cpr_local_skipped",
                 "Local (relative) positions skipped due to missing data",
             ),
             (
+                "counter",
+                "total",
                 "local_speed",
                 "stats_cpr_local_speed",
                 "Local positions rejected due to speed check",
@@ -155,16 +250,22 @@ Specs = {
         ),
         "cpu": (
             (
+                "counter",
+                "total",
                 "background",
                 "stats_cpu_background_milliseconds",
                 "Time spent in network I/O, processing and periodic tasks",
             ),
             (
+                "counter",
+                "total",
                 "demod",
                 "stats_cpu_demod_milliseconds",
                 "Time spent demodulation and decoding data from SDR dongle",
             ),
             (
+                "counter",
+                "total",
                 "reader",
                 "stats_cpu_reader_milliseconds",
                 "Time spent reading sample data from SDR dongle",
@@ -172,40 +273,78 @@ Specs = {
         ),
         "local": (
             (
+                "counter",
+                "total",
                 "accepted",
                 "stats_local_accepted",
                 "Number of valid Mode S messages accepted with N-bit errors corrected",
             ),
-            ("signal", "stats_local_signal_strength_dbFS", "Signal strength dbFS"),
             (
+                "gauge",
+                "last1min",
+                "signal",
+                "stats_local_signal_strength_dbFS",
+                "Signal strength dbFS",
+            ),
+            (
+                "gauge",
+                "last1min",
                 "peak_signal",
                 "stats_local_peak_signal_strength_dbFS",
                 "Peak signal strength dbFS",
             ),
-            ("noise", "stats_local_noise_level_dbFS", "Noise level dbFS"),
             (
+                "gauge",
+                "last1min",
+                "noise",
+                "stats_local_noise_level_dbFS",
+                "Noise level dbFS",
+            ),
+            (
+                "counter",
+                "total",
                 "strong_signals",
                 "stats_local_strong_signals",
                 "Number of messages that had a signal power above -3dBFS",
             ),
             (
+                "counter",
+                "total",
                 "bad",
                 "stats_local_bad",
                 "Number of Mode S preambles that didn't result in a valid message",
             ),
-            ("modes", "stats_local_modes", "Number of Mode S preambles received"),
-            ("modeac", "stats_local_modeac", "Number of Mode A/C preambles decoded"),
             (
+                "counter",
+                "total",
+                "modes",
+                "stats_local_modes",
+                "Number of Mode S preambles received",
+            ),
+            (
+                "counter",
+                "total",
+                "modeac",
+                "stats_local_modeac",
+                "Number of Mode A/C preambles decoded",
+            ),
+            (
+                "counter",
+                "total",
                 "samples_dropped",
                 "stats_local_samples_dropped",
                 "Number of samples dropped",
             ),
             (
+                "counter",
+                "total",
                 "samples_processed",
                 "stats_local_samples_processed",
                 "Number of samples processed",
             ),
             (
+                "counter",
+                "total",
                 "unknown_icao",
                 "stats_local_unknown_icao",
                 "Number of Mode S preambles containing unrecognized ICAO",
@@ -213,29 +352,56 @@ Specs = {
         ),
         "remote": (
             (
+                "counter",
+                "total",
                 "accepted",
                 "stats_remote_accepted",
                 "Number of valid Mode S messages accepted with N-bit errors corrected",
             ),
             (
+                "counter",
+                "total",
                 "bad",
                 "stats_remote_bad",
                 "Number of Mode S preambles that didn't result in a valid message",
             ),
-            ("modeac", "stats_remote_modeac", "Number of Mode A/C preambles decoded"),
-            ("modes", "stats_remote_modes", "Number of Mode S preambles received"),
             (
+                "counter",
+                "total",
+                "modeac",
+                "stats_remote_modeac",
+                "Number of Mode A/C preambles decoded",
+            ),
+            (
+                "counter",
+                "total",
+                "modes",
+                "stats_remote_modes",
+                "Number of Mode S preambles received",
+            ),
+            (
+                "counter",
+                "total",
                 "unknown_icao",
                 "stats_remote_unknown_icao",
                 "Number of Mode S preambles containing unrecognized ICAO",
             ),
         ),
         "tracks": (
-            ("all", "stats_tracks_all", "Number of tracks created"),
+            ("counter", "total", "all", "stats_tracks_all", "Number of tracks created"),
             (
+                "counter",
+                "total",
                 "single_message",
                 "stats_tracks_single_message",
                 "Number of tracks consisting of only a single message",
+            ),
+            (
+                "counter",
+                "total",
+                "unreliable",
+                "stats_tracks_unreliable",
+                "Number of unreliable tracks",
             ),
         ),
     },
