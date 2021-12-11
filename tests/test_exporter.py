@@ -39,7 +39,7 @@ class Dump1090ServiceEmulator:
             content = f.read()
         return web.Response(status=200, body=content, content_type="application/json")
 
-    async def start(self, addr="127.0.0.1", port=None):
+    async def start(self, addr="127.0.0.1", port=9999):
         """Start the dump1090 service emulator"""
         app = web.Application()
         app.add_routes(
@@ -68,10 +68,7 @@ class TestExporter(asynctest.TestCase):  # pylint: disable=missing-class-docstri
             await ds.start()
 
             # Start the dump1090exporter
-            de = Dump1090Exporter(
-                resource_path=ds.url,
-                origin=TEST_ORIGIN,
-            )
+            de = Dump1090Exporter(resource_path=ds.url, origin=TEST_ORIGIN, port=9998)
 
             await de.start()
             await asyncio.sleep(0.3)
