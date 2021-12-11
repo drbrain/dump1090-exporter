@@ -266,17 +266,27 @@ class Dump1090Exporter:
         The `stats` key stores metrics under group keys. It has a value
         of Dict[str, Dict[str, Gauge]]
         """
-        self.metrics = {"aircraft": {}, "internal": {}, "stats": {}}  # type: ignore
+        self.metrics = {"aircraft": {}, "http": {}, "stats": {}}  # type: ignore
 
         # aircraft
         aircraft = self.metrics["aircraft"]
         for (name, prometheus_name, doc) in Specs["aircraft"]:  # type: ignore
             aircraft[name] = Gauge(f"{self.prefix}{prometheus_name}", doc)
 
-        # internal
-        internal = self.metrics["internal"]
+        # internal http
+        http = self.metrics["http"]
 
-        internal["http_requests"] = Histogram(
+        http["total"] = Counter(
+            f"{self.prefix}http_requests_total",
+            "Number of HTTP requests made to dump1090",
+        )
+
+        http["errors"] = Counter(
+            f"{self.prefix}http_request_errors_total",
+            "Number of HTTP request errors from dump1090",
+        )
+
+        http["durations"] = Histogram(
             f"{self.prefix}http_request_duration_seconds", "HTTP request durations"
         )
 
@@ -304,7 +314,17 @@ class Dump1090Exporter:
         """Fetch JSON data from a web or file resource and return a dict"""
         logger.debug(f"fetching {resource}")
         if resource.startswith("http"):
+            labels = {}
+
+            if self.resources.aircraft == resource:
+                labels["resource"] = "aircraft"
+            elif self.resources.receiver == resource:
+                labels["resource"] = "receiver"
+            elif self.resources.stats == resource:
+                labels["resource"] = "stats"
+
             start = time.monotonic()
+            self.metrics["http"]["total"].inc(labels)
 
             try:
                 async with aiohttp.ClientSession() as session:
@@ -315,22 +335,21 @@ class Dump1090Exporter:
                             raise Exception(f"Fetch failed {resp.status}: {resource}")
                         data = await resp.json()
             except asyncio.TimeoutError:
+                error_labels = labels.copy()
+                error_labels["error"] = "timeout"
+                self.metrics["http"]["errors"].inc(error_labels)
+
                 raise Exception(f"Request timed out to {resource}") from None
             except aiohttp.ClientError as exc:
+                error_labels = labels.copy()
+                error_labels["error"] = "client"
+                self.metrics["http"]["errors"].inc(labels)
+
                 raise Exception(f"Client error {exc}, {resource}") from None
             finally:
                 duration = time.monotonic() - start
 
-                labels = {}
-
-                if self.resources.aircraft == resource:
-                    labels["source"] = "aircraft"
-                elif self.resources.receiver == resource:
-                    labels["source"] = "resource"
-                elif self.resources.stats == resource:
-                    labels["source"] = "stats"
-
-                self.metrics["internal"]["http_requests"].observe(labels, duration)
+                self.metrics["http"]["durations"].observe(labels, duration)
         else:
             with open(resource, "rt") as fd:  # pylint: disable=unspecified-encoding
                 data = json.loads(fd.read())
