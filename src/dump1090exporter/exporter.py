@@ -9,11 +9,12 @@ import datetime
 import json
 import logging
 import math
+import time
 from math import asin, atan, cos, degrees, radians, sin, sqrt
 from typing import Any, Dict, Sequence, Tuple, Union
 
 import aiohttp
-from aioprometheus import Counter, Gauge
+from aioprometheus import Counter, Gauge, Histogram
 from aioprometheus.service import Service
 
 from .metrics import Specs
@@ -265,16 +266,23 @@ class Dump1090Exporter:
         The `stats` key stores metrics under group keys. It has a value
         of Dict[str, Dict[str, Gauge]]
         """
-        self.metrics = {"aircraft": {}, "stats": {}}  # type: ignore
+        self.metrics = {"aircraft": {}, "internal": {}, "stats": {}}  # type: ignore
 
         # aircraft
-        d = self.metrics["aircraft"]
+        aircraft = self.metrics["aircraft"]
         for (name, prometheus_name, doc) in Specs["aircraft"]:  # type: ignore
-            d[name] = Gauge(f"{self.prefix}{prometheus_name}", doc)
+            aircraft[name] = Gauge(f"{self.prefix}{prometheus_name}", doc)
+
+        # internal
+        internal = self.metrics["internal"]
+
+        internal["http_requests"] = Histogram(
+            f"{self.prefix}http_request_duration_seconds", "HTTP request durations"
+        )
 
         # statistics
         for group, metrics_specs in Specs["stats"].items():  # type: ignore
-            d = self.metrics["stats"].setdefault(group, {})
+            stats = self.metrics["stats"].setdefault(group, {})
             for (
                 metric_type,
                 time_period,
@@ -287,7 +295,7 @@ class Dump1090Exporter:
                 elif metric_type == "counter":
                     metric = Counter(f"{self.prefix}{prometheus_name}", doc)
 
-                d[stats_name] = (time_period, metric)
+                stats[stats_name] = (time_period, metric)
 
     async def _fetch(
         self,
@@ -296,6 +304,8 @@ class Dump1090Exporter:
         """Fetch JSON data from a web or file resource and return a dict"""
         logger.debug(f"fetching {resource}")
         if resource.startswith("http"):
+            start = time.monotonic()
+
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
@@ -308,6 +318,19 @@ class Dump1090Exporter:
                 raise Exception(f"Request timed out to {resource}") from None
             except aiohttp.ClientError as exc:
                 raise Exception(f"Client error {exc}, {resource}") from None
+            finally:
+                duration = time.monotonic() - start
+
+                labels = {}
+
+                if self.resources.aircraft == resource:
+                    labels["source"] = "aircraft"
+                elif self.resources.receiver == resource:
+                    labels["source"] = "resource"
+                elif self.resources.stats == resource:
+                    labels["source"] = "stats"
+
+                self.metrics["internal"]["http_requests"].observe(labels, duration)
         else:
             with open(resource, "rt") as fd:  # pylint: disable=unspecified-encoding
                 data = json.loads(fd.read())
@@ -505,7 +528,7 @@ class Dump1090Exporter:
                 if a["mlat"] and "lat" in a["mlat"]:
                     aircraft_with_mlat += 1
 
-        labels = {} # type: Dict[str, str]
+        labels = {}  # type: Dict[str, str]
         metrics = self.metrics["aircraft"]
 
         metrics["observed"].set(labels, aircraft_observed)
