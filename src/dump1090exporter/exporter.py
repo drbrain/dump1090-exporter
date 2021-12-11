@@ -106,32 +106,11 @@ def relative_angle(pos1: Position, pos2: Position) -> float:
         return 180 + deg
 
 
-# lookup table for directions - each step is 22.5 degrees
-direction_lut = (
-    "N",
-    "NE",
-    "NE",
-    "E",
-    "E",
-    "SE",
-    "SE",
-    "S",
-    "S",
-    "SW",
-    "SW",
-    "W",
-    "W",
-    "NW",
-    "NW",
-    "N",
-)
-
-
 def relative_direction(angle: float) -> str:
     """
     Convert relative angle in degrees into direction (N/NE/E/SE/S/SW/W/NW)
     """
-    return direction_lut[int(angle / 22.5)]
+    return str(int(angle / 22.5) * 22.5)
 
 
 def haversine_distance(
@@ -180,7 +159,6 @@ class Dump1090Exporter:
         stats_interval: int = 60,
         receiver_interval: int = 10,
         receiver_interval_origin_ok: int = 300,
-        time_periods: Sequence[str] = ("last1min",),
         origin: PositionType = None,
         fetch_timeout: float = 2.0,
     ) -> None:
@@ -202,9 +180,6 @@ class Dump1090Exporter:
         :param stats_interval: number of seconds between processing the
           dump1090 stats data. Defaults to 60 seconds as the data only
           seems to be updated at 60 second intervals.
-        :param time_periods: A list of time period keys to extract from the
-          statistics data. By default this is just the 'last1min' time
-          period as Prometheus can provide the historical access.
         :param origin: a tuple of (lat, lon) representing the receiver
           location. The origin is used for distance calculations with
           aircraft data. If it is not provided then range calculations
@@ -224,7 +199,6 @@ class Dump1090Exporter:
         )
         self.aircraft_interval = datetime.timedelta(seconds=aircraft_interval)
         self.stats_interval = datetime.timedelta(seconds=stats_interval)
-        self.stats_time_periods = time_periods
         self.origin = Position(*origin) if origin else None
         self.fetch_timeout = fetch_timeout
         self.svr = Service()
@@ -471,24 +445,40 @@ class Dump1090Exporter:
         aircraft_with_mlat = 0
         aircraft_max_range = 0.0
         aircraft_direction = {
-            "N": 0,
-            "NE": 0,
-            "E": 0,
-            "SE": 0,
-            "S": 0,
-            "SW": 0,
-            "W": 0,
-            "NW": 0,
+            "0.0": 0,
+            "22.5": 0,
+            "45.0": 0,
+            "67.5": 0,
+            "90.0": 0,
+            "112.5": 0,
+            "135.0": 0,
+            "157.5": 0,
+            "180.0": 0,
+            "202.5": 0,
+            "225.0": 0,
+            "247.5": 0,
+            "270.0": 0,
+            "292.5": 0,
+            "315.0": 0,
+            "337.5": 0,
         }
         aircraft_direction_max_range = {
-            "N": 0.0,
-            "NE": 0.0,
-            "E": 0.0,
-            "SE": 0.0,
-            "S": 0.0,
-            "SW": 0.0,
-            "W": 0.0,
-            "NW": 0.0,
+            "0.0": 0.0,
+            "22.5": 0.0,
+            "45.0": 0.0,
+            "67.5": 0.0,
+            "90.0": 0.0,
+            "112.5": 0.0,
+            "135.0": 0.0,
+            "157.5": 0.0,
+            "180.0": 0.0,
+            "202.5": 0.0,
+            "225.0": 0.0,
+            "247.5": 0.0,
+            "270.0": 0.0,
+            "292.5": 0.0,
+            "315.0": 0.0,
+            "337.5": 0.0,
         }
         # Filter aircraft to only those that have been seen within the
         # last n seconds to minimise contributions from aged observations.
@@ -515,20 +505,16 @@ class Dump1090Exporter:
                 if a["mlat"] and "lat" in a["mlat"]:
                     aircraft_with_mlat += 1
 
-        labels = {}
+        labels = {} # type: Dict[str, str]
         metrics = self.metrics["aircraft"]
 
         metrics["observed"].set(labels, aircraft_observed)
-        metrics["observed_with_pos"].set(labels, aircraft_with_pos)
         metrics["observed_with_mlat"].set(labels, aircraft_with_mlat)
-        metrics["max_range"].set(labels, aircraft_max_range)
 
         for direction, value in aircraft_direction.items():
-            labels = dict(time_period="latest", direction=direction)
-            metrics["observed_with_direction"].set(labels, value)
-            metrics["max_range_by_direction"].set(
-                labels, aircraft_direction_max_range[direction]
-            )
+            labels = dict(direction=direction)
+            metrics["observed_with_pos"].set(labels, value)
+            metrics["max_range"].set(labels, aircraft_direction_max_range[direction])
 
         logger.debug(
             f"aircraft: observed={aircraft_observed}, "

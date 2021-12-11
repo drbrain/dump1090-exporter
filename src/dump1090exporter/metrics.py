@@ -59,11 +59,6 @@ Specs = {
             "Number of aircraft recently observed with position",
         ),
         (
-            "observed_with_direction",
-            "recent_aircraft_with_direction",
-            "Number of aircraft recently observed with direction relative to receiver",
-        ),
-        (
             "observed_with_mlat",
             "recent_aircraft_with_multilateration",
             "Number of aircraft recently observed with multilateration",
@@ -72,11 +67,6 @@ Specs = {
             "max_range",
             "recent_aircraft_max_range",
             "Maximum range of recently observed aircraft",
-        ),
-        (
-            "max_range_by_direction",
-            "recent_aircraft_max_range_by_direction",
-            "Maximum range of recently observed aircraft by direction relative to receiver",
         ),
     ),
     "stats": {
