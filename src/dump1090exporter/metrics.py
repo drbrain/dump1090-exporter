@@ -66,7 +66,7 @@ Specs = {
         (
             "max_range",
             "recent_aircraft_max_range",
-            "Maximum range of recently observed aircraft",
+            "Aircraft maximum range by bearing",
         ),
     ),
     "stats": {

@@ -65,9 +65,32 @@ def build_resources(base: str) -> Dump1090Resources:
     return resources
 
 
+def distance_bucket(distance: float) -> str:
+    """
+    Returns a bucket for the given distance.
+
+    :param1 distance: a float distance in meters
+
+    :returns: bucket for that distance in meters
+    :rtype: str
+    """
+    if distance > 400000:
+        return "+Inf"
+    elif distance > 320000:
+        return "400000.0"
+    elif distance > 240000:
+        return "320000.0"
+    elif distance > 160000:
+        return "240000.0"
+    elif distance > 80000:
+        return "160000.0"
+    else:
+        return "80000.0"
+
+
 def relative_angle(pos1: Position, pos2: Position) -> float:
     """
-    Calculate the direction pos2 relative to pos1. Returns angle in degrees
+    Calculate the bearing pos2 relative to pos1. Returns angle in degrees
 
     :param pos1: a Position tuple defining (lat, lon) of origin in decimal degrees
     :param pos2: a Position tuple defining (lat, lon) of target in decimal degrees
@@ -107,11 +130,11 @@ def relative_angle(pos1: Position, pos2: Position) -> float:
         return 180 + deg
 
 
-def relative_direction(angle: float) -> str:
+def relative_bearing(bearing: float) -> str:
     """
-    Convert relative angle in degrees into direction (N/NE/E/SE/S/SW/W/NW)
+    Maps a bearing into a bearing bucket
     """
-    return str(int(angle / 22.5) * 22.5)
+    return str(int(bearing / 22.5) * 22.5)
 
 
 def haversine_distance(
@@ -272,6 +295,17 @@ class Dump1090Exporter:
         aircraft = self.metrics["aircraft"]
         for (name, prometheus_name, doc) in Specs["aircraft"]:  # type: ignore
             aircraft[name] = Gauge(f"{self.prefix}{prometheus_name}", doc)
+
+        aircraft["recent_count"] = Gauge(
+            f"{self.prefix}recent_aircraft",
+            "Recent aircraft by range and bearing",
+        )
+
+        aircraft["count"] = Histogram(
+            f"{self.prefix}aircraft",
+            "Aircraft by range and bearing",
+            buckets=[80000, 160000, 240000, 320000, 400000],
+        )
 
         # internal http
         http = self.metrics["http"]
@@ -472,6 +506,8 @@ class Dump1090Exporter:
         :param threshold: only let aircraft seen within this threshold to
           contribute to the metrics.
         """
+        metrics = self.metrics["aircraft"]
+
         # Ensure aircraft dict always contains all keys, as optional
         # items are not always present.
         for entry in aircraft["aircraft"]:
@@ -485,43 +521,11 @@ class Dump1090Exporter:
         aircraft_observed = 0
         aircraft_with_pos = 0
         aircraft_with_mlat = 0
-        aircraft_max_range = 0.0
-        aircraft_direction = {
-            "0.0": 0,
-            "22.5": 0,
-            "45.0": 0,
-            "67.5": 0,
-            "90.0": 0,
-            "112.5": 0,
-            "135.0": 0,
-            "157.5": 0,
-            "180.0": 0,
-            "202.5": 0,
-            "225.0": 0,
-            "247.5": 0,
-            "270.0": 0,
-            "292.5": 0,
-            "315.0": 0,
-            "337.5": 0,
-        }
-        aircraft_direction_max_range = {
-            "0.0": 0.0,
-            "22.5": 0.0,
-            "45.0": 0.0,
-            "67.5": 0.0,
-            "90.0": 0.0,
-            "112.5": 0.0,
-            "135.0": 0.0,
-            "157.5": 0.0,
-            "180.0": 0.0,
-            "202.5": 0.0,
-            "225.0": 0.0,
-            "247.5": 0.0,
-            "270.0": 0.0,
-            "292.5": 0.0,
-            "315.0": 0.0,
-            "337.5": 0.0,
-        }
+        aircraft_positions = collections.defaultdict(
+            int
+        )  # type: Dict[Tuple[str, str], float]
+        aircraft_max_ranges = collections.defaultdict(int)  # type: Dict[str, float]
+
         # Filter aircraft to only those that have been seen within the
         # last n seconds to minimise contributions from aged observations.
         for a in aircraft["aircraft"]:
@@ -529,37 +533,43 @@ class Dump1090Exporter:
                 aircraft_observed += 1
             if a["seen_pos"] and a["seen_pos"] < threshold:
                 aircraft_with_pos += 1
-                if self.origin:
-                    distance = haversine_distance(
-                        self.origin, Position(a["lat"], a["lon"])
-                    )
-                    if distance > aircraft_max_range:
-                        aircraft_max_range = distance
-
-                    a["rel_angle"] = relative_angle(
-                        self.origin, Position(a["lat"], a["lon"])
-                    )
-                    a["rel_direction"] = relative_direction(a["rel_angle"])
-                    aircraft_direction[a["rel_direction"]] += 1
-                    if distance > aircraft_direction_max_range[a["rel_direction"]]:
-                        aircraft_direction_max_range[a["rel_direction"]] = distance
 
                 if a["mlat"] and "lat" in a["mlat"]:
                     aircraft_with_mlat += 1
 
-        labels = {}  # type: Dict[str, str]
-        metrics = self.metrics["aircraft"]
+                if self.origin:
+                    distance = haversine_distance(
+                        self.origin, Position(a["lat"], a["lon"])
+                    )
 
-        metrics["observed"].set(labels, aircraft_observed)
-        metrics["observed_with_mlat"].set(labels, aircraft_with_mlat)
+                    distance_label = distance_bucket(distance)
 
-        for direction, value in aircraft_direction.items():
-            labels = dict(direction=direction)
-            metrics["observed_with_pos"].set(labels, value)
-            metrics["max_range"].set(labels, aircraft_direction_max_range[direction])
+                    bearing = relative_angle(self.origin, Position(a["lat"], a["lon"]))
+                    bearing_label = relative_bearing(bearing)
+
+                    if distance > aircraft_max_ranges[bearing_label]:
+                        aircraft_max_ranges[bearing_label] = distance
+
+                    recent_labels = (bearing_label, distance_label)
+                    aircraft_positions[recent_labels] += 1
+
+                    labels = dict(bearing=bearing_label)
+
+                    metrics["count"].observe(labels, distance)
+
+        metrics["observed"].set({}, aircraft_observed)
+        metrics["observed_with_pos"].set({}, aircraft_with_pos)
+        metrics["observed_with_mlat"].set({}, aircraft_with_mlat)
+
+        for bearing_label, max_range in aircraft_max_ranges.items():
+            metrics["max_range"].set(dict(bearing=bearing_label), max_range)
+
+        for labels, count in aircraft_positions.items():  # type: ignore
+            labels = dict(bearing=labels[0], distance=labels[1])  # type: ignore
+
+            metrics["recent_count"].set(labels, count)
 
         logger.debug(
             f"aircraft: observed={aircraft_observed}, "
-            f"with_pos={aircraft_with_pos}, with_mlat={aircraft_with_mlat}, "
-            f"max_range={aircraft_max_range}"
+            f"with_pos={aircraft_with_pos}, with_mlat={aircraft_with_mlat}"
         )
